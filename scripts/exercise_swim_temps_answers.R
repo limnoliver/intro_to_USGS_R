@@ -48,36 +48,69 @@ summary(dat$Date)
 dat <- renameNWISColumns(dat)
 
 # first, let's pick one year of recent data
-names(dat)
-summary(dat$Date)
 dat <- mutate(dat, year = lubridate::year(Date))
 dat2012 <- filter(dat, year %in% 2012)
 
-# first let's take plot the data to make sure it makes sense!
+# let's visualize
 ggplot(dat2012, aes(x = Date, y = Wtemp)) +
   geom_point() + 
   geom_line() +
-  geom_hline(yintercept = mytemp_c, color = 'red')
+  geom_hline(yintercept = mytemp_c, color = 'red') +
+  theme_bw() +
+  labs(y = 'Water Temperature [deg C]')
 
-# what's the first day I could swim?
-min(dat2012$Date[dat2012$Wtemp > mytemp_c])
+# calculate the first day that the river exceeds my threshold
+swimmable <- dat2012 %>%
+  filter(Wtemp >= mytemp_c) 
 
-# June 20 is the earliest I would want to swim here
-# what about the average swim date across all years?
-above_thresh <- filter(dat, Wtemp > mytemp_c) %>%
+min(swimmable$Date) # June 19th!
+
+# how many days were swimmable? 
+nrow(swimmable) # 11 days
+
+# what about other years? Let's calculate minimum date and swimmable days each year
+swimmable_all <- dat %>%
+  filter(Wtemp > mytemp_c) %>%
   group_by(year) %>%
-  summarize(min_swim_date = min(Date),
-            ndays = n())
+  summarize(min_date = min(Date), 
+            n_days = n(),
+            swim_window = max(Date)-min(Date))
 
-# but it's not just about 
+# but it's not just about water temperature, the air temperature
+# needs to be warm, too. Set your air temperature threshold
+myairtemp <- 82
+myairtemp_c <- (myairtemp - 32)*(5/9)
+
 # get local air temperature records
 # run install.packages only once
-install.packages('openmeteo')
+#install.packages('openmeteo')
 library(openmeteo)
 
 # find the lat/long of your selected USGS gage
 
 site_meta <- dataRetrieval::readNWISsite(mysite)
 airtemps <- openmeteo::weather_history(c(site_meta$dec_lat_va, site_meta$dec_long_va),
-                                       start = '2020-01-01', end = '2020-12-31',
+                                       start = '2012-01-01', end = '2012-12-31',
                                        daily = 'temperature_2m_max')
+
+# pair the air temps with the water temps
+head(airtemps)
+head(dat2012)
+
+paired <- left_join(dat2012, airtemps, by = c('Date' = 'date'))
+
+# let's plot the data to make sure it makes sense
+ggplot(paired, aes(x = Date, y = daily_temperature_2m_max)) +
+  geom_line() +
+  geom_line(aes(x = Date, y = Wtemp), col = 'blue') +
+  geom_hline(yintercept = myairtemp_c) +
+  geom_hline(yintercept = mytemp_c, col = 'blue') +
+  theme_bw()
+
+# let's find the dates that meet both criteria!
+swimmable_all_withair <- paired %>%
+  filter(Wtemp > mytemp_c & daily_temperature_2m_max > myairtemp_c) %>%
+  group_by(year) %>%
+  summarize(min_date = min(Date), 
+            n_days = n(),
+            swim_window = max(Date)-min(Date))
